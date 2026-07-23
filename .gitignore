@@ -1,0 +1,57 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.Python
+build/
+dist/
+
+# --- Virtual environments ---
+venv/
+.venv/
+
+# --- Environment / secrets ---
+.env
+*.pem
+.aws/
+credentials
+config
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# --- Data & model artifacts (keep the repo light — use S3 for these) ---
+data/raw/
+data/*.csv
+data/*.parquet
+*.pkl
+*.joblib
+*.h5
+*.pt
+*.pth
+checkpoints/
+output/
+outputs/
+model/
+models/
+
+# --- Experiment tracking ---
+wandb/
+mlruns/
+*.log
+
+# --- SageMaker local artifacts ---
+.sagemaker/
+sagemaker-*.tar.gz
+
+# --- OS / editor junk ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# --- Jupyter/plots (optional, uncomment if you don't want generated plots in git) ---
+# *.png
+# *.jpg

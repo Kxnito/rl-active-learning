@@ -158,8 +158,10 @@ project-repo/
 
 ## 8. Open Decisions (fill in as you go)
 
-- [ ] Final UCI dataset(s) chosen:
-- [ ] RL algorithm chosen (DQN / PPO / bandit-first?):
-- [ ] Labeling budget per episode:
-- [ ] Reward function exact formula:
-- [ ] Stretch goal(s) confirmed:
+- [ ] Final UCI dataset(s) chosen: **Proposed — Breast Cancer Wisconsin** (569 samples, binary classification) as the primary Phase 1 dataset — small enough to iterate fast, clean enough that accuracy-gain-per-label signal won't be swamped by noise. **Proposed second dataset — Wine Quality**, for the Phase 2 robustness pass already scheduled in Weeks 7–10.
+- [ ] RL algorithm chosen (DQN / PPO / bandit-first?): **Proposed — DQN** as the starting point (fixed discrete action space once masking is applied, well-supported in SB3), with **PPO as fallback** if the masked-action-space approach proves awkward.
+- [ ] Labeling budget per episode: **Proposed — 50 labels** — matches the "~100 labels" ballpark in Section 1 while staying small relative to the 569-sample pool, leaving real headroom for "budget efficiency" to be a meaningful reward signal.
+- [ ] Reward function exact formula: **Proposed — `reward_t = val_accuracy(model_t) - val_accuracy(model_{t-1})`** — accuracy delta on a held-out validation split after each label is revealed and the student model is retrained. Open design risk for Person B to resolve in Weeks 2–5: the action space (which unlabeled point to query) shrinks every step as points get labeled, which doesn't fit SB3's fixed discrete-action assumption out of the box — likely needs either a capped/masked candidate set per step or a scoring-network approach.
+- [ ] Stretch goal(s) confirmed: **Proposed — second-dataset robustness run + ablations** (reward design, budget size) as the primary stretch; SageMaker Endpoint + Streamlit demo UI stays true/optional stretch, per the existing Weeks 13–14 wording.
+
+*(Proposals above are a starting point for team discussion, not decided — confirm and check off at the Week 1 sync.)*
