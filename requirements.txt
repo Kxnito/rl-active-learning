@@ -1,0 +1,11 @@
+scikit-learn>=1.4
+gymnasium>=0.29
+stable-baselines3>=2.3
+sb3-contrib>=2.3
+torch>=2.2
+pandas>=2.2
+numpy>=1.26
+matplotlib>=3.8
+boto3>=1.34
+sagemaker>=2.200
+wandb>=0.16
