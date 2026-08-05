@@ -55,3 +55,5 @@ Thumbs.db
 # --- Jupyter/plots (optional, uncomment if you don't want generated plots in git) ---
 # *.png
 # *.jpg
+# pytest
+.pytest_cache/
