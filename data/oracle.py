@@ -15,22 +15,23 @@ class Oracle:
         bookkeeping reveal()/is_revealed() need (e.g. a revealed-mask or
         a set of queried indices).
         """
-        raise NotImplementedError
+        self._pool_y = pool_y
+        self._revealed_mask = np.zeros(len(pool_y), dtype=bool)
 
     def reveal(self, index: int) -> int:
-        """
-        TODO(Person A): return the true label for pool[index] and mark it
-        as revealed. Raise if index was already revealed or is out of
-        range — the env should never be calling this on an invalid index,
-        so a loud failure here is more useful than a silent one.
-        """
-        raise NotImplementedError
+        if index < 0 or index >= len(self._pool_y):
+            raise IndexError(f"Index {index} out of range")
+        if self._revealed_mask[index]:
+            raise ValueError(f"Index {index} has already been revealed")
+    
+        self._revealed_mask[index] = True
+        return self._pool_y[index]
 
     def is_revealed(self, index: int) -> bool:
-        """TODO(Person A): used by env.action_masks() to mark invalid actions."""
-        raise NotImplementedError
+        if index < 0 or index >= len(self._pool_y):
+            raise IndexError(f"Index {index} out of range")
+        return self._revealed_mask[index]
 
     @property
     def num_revealed(self) -> int:
-        """TODO(Person A): used by env state (labels used so far) and to check the budget."""
-        raise NotImplementedError
+        return self._revealed_mask.sum()
