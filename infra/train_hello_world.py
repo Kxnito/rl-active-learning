@@ -33,8 +33,10 @@ def main():
     os.makedirs(args.model_dir, exist_ok=True)
     os.makedirs(args.output_data_dir, exist_ok=True)
 
+    timestamp = datetime.utcnow().isoformat()
+
     print("=== Hello World SageMaker Job ===")
-    print(f"Timestamp: {datetime.utcnow().isoformat()}")
+    print(f"Timestamp: {timestamp}")
     print(f"Train data directory (mounted from S3): {args.train_dir}")
 
     # List whatever SageMaker mounted from S3 so we can confirm the data channel works
@@ -48,7 +50,7 @@ def main():
     result = {
         "status": "success",
         "message": "Hello from SageMaker! Environment and I/O are working.",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": timestamp,
     }
     result_path = os.path.join(args.output_data_dir, "hello_world_result.json")
     with open(result_path, "w") as f:
