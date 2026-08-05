@@ -20,6 +20,8 @@ static dataset into an active learning problem.
 """
 
 from dataclasses import dataclass
+from sklearn.datasets import load_breast_cancer
+from sklearn.model_selection import train_test_split
 
 import numpy as np
 
@@ -37,9 +39,30 @@ class DatasetSplits:
 
 
 def load_dataset(seed_size: int, val_size: int, test_size: int, random_state: int = 0) -> DatasetSplits:
-    """
-    TODO(Person A): load via sklearn.datasets.load_breast_cancer(), shuffle,
-    and split into seed/pool/val/test per the sizes above. Consider
-    stratifying by class so the seed set isn't accidentally single-class.
-    """
-    raise NotImplementedError
+    """Splits Breast Cancer Wisconsin into seed/pool/val/test per DatasetSplits."""
+    
+    data = load_breast_cancer()
+    X, y = data.data, data.target
+
+    # cut 1: carve off the test set
+    X_temp, X_test, y_temp, y_test = train_test_split(
+        X, y, test_size=test_size, stratify=y, random_state=random_state
+    )
+
+    # cut 2: carve off the val set from what's left
+    X_temp2, X_val, y_temp2, y_val = train_test_split(
+        X_temp, y_temp, test_size=val_size, stratify=y_temp, random_state=random_state
+    )
+
+    # cut 3: split what's left into seed (small) and pool (the rest)
+    X_seed, X_pool, y_seed, y_pool = train_test_split(
+        X_temp2, y_temp2, train_size=seed_size, stratify=y_temp2, random_state=random_state
+    )
+
+    return DatasetSplits(
+        seed_X=X_seed, seed_y=y_seed,
+        pool_X=X_pool, pool_y=y_pool,
+        val_X=X_val, val_y=y_val,
+        test_X=X_test, test_y=y_test,
+    )
+

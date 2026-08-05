@@ -30,9 +30,20 @@ from data.oracle import Oracle
 class ActiveLearningEnv(gym.Env):
     def __init__(self, splits: DatasetSplits, budget: int):
         super().__init__()
-        self.splits = splits
+        # Store only the env-safe pieces as named attributes, not the whole
+        # DatasetSplits object — that would keep splits.pool_y (the ground
+        # truth labels) reachable from every method for the env's entire
+        # lifetime. pool_y is needed once per episode, only to build a
+        # fresh Oracle in reset() — everywhere else must go through
+        # self.oracle.reveal()/is_revealed(), never self._pool_y directly.
+        self.seed_X, self.seed_y = splits.seed_X, splits.seed_y
+        self.pool_X = splits.pool_X
+        self.val_X, self.val_y = splits.val_X, splits.val_y
+        self.test_X, self.test_y = splits.test_X, splits.test_y
+        self._pool_y = splits.pool_y
+
         self.budget = budget
-        pool_capacity = len(splits.pool_X)
+        pool_capacity = len(self.pool_X)
 
         self.action_space = spaces.Discrete(pool_capacity)
         # TODO(Person B): define the real observation space once _get_obs()'s
@@ -45,7 +56,7 @@ class ActiveLearningEnv(gym.Env):
 
     def reset(self, *, seed=None, options=None):
         """
-        TODO(Person B): re-create a fresh Oracle over splits.pool_y, retrain
+        TODO(Person B): re-create a fresh Oracle over self._pool_y, retrain
         the student model on just the seed set, and return the initial
         observation via _get_obs().
         """
