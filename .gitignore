@@ -1,5 +1,6 @@
 # --- Python ---
 __pycache__/
+*.pyc
 *.py[cod]
 *.egg-info/
 .Python
@@ -33,6 +34,7 @@ data/*.parquet
 checkpoints/
 output/
 outputs/
+*.tar.gz
 model/
 models/
 
