@@ -74,6 +74,8 @@ class ActiveLearningEnv(gym.Env):
         super().reset(seed=seed)
 
         self.oracle = Oracle(self._pool_y)
+
+        self._revealed_X = []
         self._revealed_y = [] # Initialize a list to store revealed labels
 
         self.student_model = LogisticRegression()  # Initialize the student model
@@ -90,15 +92,31 @@ class ActiveLearningEnv(gym.Env):
           4. terminated = self.oracle.num_revealed >= self.budget
           5. return (obs, reward, terminated, truncated=False, info)
         """
-        raise NotImplementedError
+        val_accuracy_before = self.student_model.score(self._scaler.transform(self.val_X), self.val_y)  # Get validation accuracy before revealing
 
+        label = self.oracle.reveal(action)  # Reveal the label for the selected action
+        self._revealed_X.append(self.pool_X[action])  # Store the revealed feature
+        self._revealed_y.append(label)  # Store the revealed label
+
+        train_X = np.vstack([self.seed_X] + self._revealed_X) if self._revealed_X else self.seed_X  # Combine seed and revealed features
+        train_y = np.concatenate([self.seed_y, self._revealed_y]) if self._revealed_y else self.seed_y  # Combine seed and revealed labels
+        self.student_model.fit(self._scaler.transform(train_X), train_y)  # Retrain the student model
+
+        val_accuracy_after = self.student_model.score(self._scaler.transform(self.val_X), self.val_y)  # Get validation accuracy after revealing
+        reward = self._compute_reward(val_accuracy_before, val_accuracy_after)  # Compute the reward based on validation accuracy change
+
+        terminated = self.oracle.num_revealed >= self.budget  # Check if the labeling budget has been reached
+
+        return self._get_obs(), reward, terminated, False, {}  # Return the observation, reward, termination status, and info
+
+    
     def action_masks(self) -> np.ndarray:
         """
         Required by MaskablePPO. True = valid action (not yet revealed).
         TODO(Person B): build from self.oracle.is_revealed(i) for each pool
         index.
         """
-        raise NotImplementedError
+        return np.array([not self.oracle.is_revealed(i) for i in range(len(self.pool_X))], dtype=bool)  # Create a mask indicating valid actions
 
     def _get_obs(self) -> np.ndarray:
         """
