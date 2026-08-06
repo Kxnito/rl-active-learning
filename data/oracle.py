@@ -21,17 +21,23 @@ class Oracle:
     def reveal(self, index: int) -> int:
         """Returns pool_y[index] and marks it revealed; raises if already revealed or out of range."""
         self._check_in_range(index)
-        if (self._revealed[index]):
+        if self._revealed[index]:
             raise ValueError(f"Index {index} has already been revealed.")
-        self._revealed[index] = True  # Mark the index as revealed
-        return self._pool_y[index]  # Return the true label for the given index
+        self._revealed[index] = True
+        return self._pool_y[index]
 
     def is_revealed(self, index: int) -> bool:
         """Whether index has already been revealed — used by env.action_masks()."""
         self._check_in_range(index)
-        return bool(self._revealed[index])  # Return whether the index has been revealed
+        return bool(self._revealed[index])
 
     @property
     def num_revealed(self) -> int:
         """Number of indices revealed so far — used by env state and to check the budget."""
-        return int(self._revealed.sum())  # Return the number of revealed indices
+        return int(self._revealed.sum())
+
+    @property
+    def revealed_mask(self) -> np.ndarray:
+        """Boolean array, True where that pool index has been revealed — a vectorized
+        alternative to calling is_revealed() in a per-index loop, e.g. in action_masks()."""
+        return self._revealed.copy()

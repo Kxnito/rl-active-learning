@@ -22,6 +22,8 @@ from typing import Optional
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
 
 from data.dataset import DatasetSplits
 from data.oracle import Oracle
@@ -42,6 +44,20 @@ class ActiveLearningEnv(gym.Env):
         self.test_X, self.test_y = splits.test_X, splits.test_y
         self._pool_y = splits.pool_y
 
+        # Fit once on the full feature pool (labels aren't involved, so this
+        # isn't leaking anything an active learning setup wouldn't already
+        # have — only pool_y is meant to stay hidden). Fitting this fresh on
+        # just the 20-sample seed set each episode was unstable: at least one
+        # of 30 features had near-zero variance in such a small sample,
+        # producing scaled values 15+ std devs out on the wider pool and
+        # overflowing the model's matmul.
+        self._scaler = StandardScaler().fit(np.concatenate([self.seed_X, self.pool_X]))
+        # seed_X/pool_X/val_X never change after this — transform once here
+        # rather than re-transforming the same constant arrays every step().
+        self._seed_X_scaled = self._scaler.transform(self.seed_X)
+        self._pool_X_scaled = self._scaler.transform(self.pool_X)
+        self._val_X_scaled = self._scaler.transform(self.val_X)
+
         self.budget = budget
         pool_capacity = len(self.pool_X)
 
@@ -49,46 +65,60 @@ class ActiveLearningEnv(gym.Env):
         # TODO(Person B): define the real observation space once _get_obs()'s
         # feature vector is decided (e.g. Box over [mean pool uncertainty,
         # labels_used / budget, class balance, ...]).
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-0.0, high=1.0, shape=(3,), dtype=np.float32)
 
         self.oracle: Optional[Oracle] = None
         self.student_model = None
 
     def reset(self, *, seed=None, options=None):
-        """
-        TODO(Person B): re-create a fresh Oracle over self._pool_y, retrain
-        the student model on just the seed set, and return the initial
-        observation via _get_obs().
-        """
         super().reset(seed=seed)
-        raise NotImplementedError
+
+        self.oracle = Oracle(self._pool_y)
+        self._revealed_X_scaled = []
+        self._revealed_y = []
+
+        self.student_model = LogisticRegression()
+        self.student_model.fit(self._seed_X_scaled, self.seed_y)
+        self._val_accuracy = self.student_model.score(self._val_X_scaled, self.val_y)
+
+        return self._get_obs(), {}
 
     def step(self, action: int):
-        """
-        TODO(Person B):
-          1. reveal(action) via self.oracle
-          2. retrain the student model on seed + all revealed labels
-          3. compute reward via _compute_reward()
-          4. terminated = self.oracle.num_revealed >= self.budget
-          5. return (obs, reward, terminated, truncated=False, info)
-        """
-        raise NotImplementedError
+        val_accuracy_before = self._val_accuracy
+
+        label = self.oracle.reveal(action)
+        self._revealed_X_scaled.append(self._pool_X_scaled[action])
+        self._revealed_y.append(label)
+
+        train_X = np.vstack([self._seed_X_scaled] + self._revealed_X_scaled)
+        train_y = self._labels_so_far()
+        self.student_model.fit(train_X, train_y)
+
+        # Cached so the next step()'s val_accuracy_before doesn't redo this
+        # scoring pass on data that hasn't changed since this line ran.
+        self._val_accuracy = self.student_model.score(self._val_X_scaled, self.val_y)
+        reward = self._compute_reward(val_accuracy_before, self._val_accuracy)
+
+        terminated = self.oracle.num_revealed >= self.budget
+
+        return self._get_obs(), reward, terminated, False, {}
 
     def action_masks(self) -> np.ndarray:
-        """
-        Required by MaskablePPO. True = valid action (not yet revealed).
-        TODO(Person B): build from self.oracle.is_revealed(i) for each pool
-        index.
-        """
-        raise NotImplementedError
+        """Required by MaskablePPO. True = valid action (not yet revealed)."""
+        return ~self.oracle.revealed_mask
+
+    def _labels_so_far(self) -> np.ndarray:
+        """seed_y plus every label revealed so far this episode."""
+        if not self._revealed_y:
+            return self.seed_y
+        return np.concatenate([self.seed_y, self._revealed_y])
 
     def _get_obs(self) -> np.ndarray:
-        """
-        TODO(Person B): build the state vector — student model's
-        uncertainty across the remaining pool, labels_used / budget, class
-        balance among revealed labels so far.
-        """
-        raise NotImplementedError
+        probs = self.student_model.predict_proba(self._pool_X_scaled)
+        uncertainty = 1 - probs.max(axis=1).mean()
+        labels_used_frac = self.oracle.num_revealed / self.budget
+        class_balance = self._labels_so_far().mean()
+        return np.array([uncertainty, labels_used_frac, class_balance], dtype=np.float32)
 
     def _compute_reward(self, val_accuracy_before: float, val_accuracy_after: float) -> float:
         """reward_t = val_accuracy(model_t) - val_accuracy(model_{t-1}) — see project-context.md Section 8."""
