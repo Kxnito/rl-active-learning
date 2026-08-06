@@ -52,6 +52,11 @@ class ActiveLearningEnv(gym.Env):
         # producing scaled values 15+ std devs out on the wider pool and
         # overflowing the model's matmul.
         self._scaler = StandardScaler().fit(np.concatenate([self.seed_X, self.pool_X]))
+        # seed_X/pool_X/val_X never change after this — transform once here
+        # rather than re-transforming the same constant arrays every step().
+        self._seed_X_scaled = self._scaler.transform(self.seed_X)
+        self._pool_X_scaled = self._scaler.transform(self.pool_X)
+        self._val_X_scaled = self._scaler.transform(self.val_X)
 
         self.budget = budget
         pool_capacity = len(self.pool_X)
@@ -66,73 +71,54 @@ class ActiveLearningEnv(gym.Env):
         self.student_model = None
 
     def reset(self, *, seed=None, options=None):
-        """
-        TODO(Person B): re-create a fresh Oracle over self._pool_y, retrain
-        the student model on just the seed set, and return the initial
-        observation via _get_obs().
-        """
         super().reset(seed=seed)
 
         self.oracle = Oracle(self._pool_y)
+        self._revealed_X_scaled = []
+        self._revealed_y = []
 
-        self._revealed_X = []
-        self._revealed_y = [] # Initialize a list to store revealed labels
-
-        self.student_model = LogisticRegression()  # Initialize the student model
-        self.student_model.fit(self._scaler.transform(self.seed_X), self.seed_y)  # Train the student model
+        self.student_model = LogisticRegression()
+        self.student_model.fit(self._seed_X_scaled, self.seed_y)
+        self._val_accuracy = self.student_model.score(self._val_X_scaled, self.val_y)
 
         return self._get_obs(), {}
 
     def step(self, action: int):
-        """
-        TODO(Person B):
-          1. reveal(action) via self.oracle
-          2. retrain the student model on seed + all revealed labels
-          3. compute reward via _compute_reward()
-          4. terminated = self.oracle.num_revealed >= self.budget
-          5. return (obs, reward, terminated, truncated=False, info)
-        """
-        val_accuracy_before = self.student_model.score(self._scaler.transform(self.val_X), self.val_y)  # Get validation accuracy before revealing
+        val_accuracy_before = self._val_accuracy
 
-        label = self.oracle.reveal(action)  # Reveal the label for the selected action
-        self._revealed_X.append(self.pool_X[action])  # Store the revealed feature
-        self._revealed_y.append(label)  # Store the revealed label
+        label = self.oracle.reveal(action)
+        self._revealed_X_scaled.append(self._pool_X_scaled[action])
+        self._revealed_y.append(label)
 
-        train_X = np.vstack([self.seed_X] + self._revealed_X) if self._revealed_X else self.seed_X  # Combine seed and revealed features
-        train_y = np.concatenate([self.seed_y, self._revealed_y]) if self._revealed_y else self.seed_y  # Combine seed and revealed labels
-        self.student_model.fit(self._scaler.transform(train_X), train_y)  # Retrain the student model
+        train_X = np.vstack([self._seed_X_scaled] + self._revealed_X_scaled)
+        train_y = self._labels_so_far()
+        self.student_model.fit(train_X, train_y)
 
-        val_accuracy_after = self.student_model.score(self._scaler.transform(self.val_X), self.val_y)  # Get validation accuracy after revealing
-        reward = self._compute_reward(val_accuracy_before, val_accuracy_after)  # Compute the reward based on validation accuracy change
+        # Cached so the next step()'s val_accuracy_before doesn't redo this
+        # scoring pass on data that hasn't changed since this line ran.
+        self._val_accuracy = self.student_model.score(self._val_X_scaled, self.val_y)
+        reward = self._compute_reward(val_accuracy_before, self._val_accuracy)
 
-        terminated = self.oracle.num_revealed >= self.budget  # Check if the labeling budget has been reached
+        terminated = self.oracle.num_revealed >= self.budget
 
-        return self._get_obs(), reward, terminated, False, {}  # Return the observation, reward, termination status, and info
+        return self._get_obs(), reward, terminated, False, {}
 
-    
     def action_masks(self) -> np.ndarray:
-        """
-        Required by MaskablePPO. True = valid action (not yet revealed).
-        TODO(Person B): build from self.oracle.is_revealed(i) for each pool
-        index.
-        """
-        return np.array([not self.oracle.is_revealed(i) for i in range(len(self.pool_X))], dtype=bool)  # Create a mask indicating valid actions
+        """Required by MaskablePPO. True = valid action (not yet revealed)."""
+        return ~self.oracle.revealed_mask
+
+    def _labels_so_far(self) -> np.ndarray:
+        """seed_y plus every label revealed so far this episode."""
+        if not self._revealed_y:
+            return self.seed_y
+        return np.concatenate([self.seed_y, self._revealed_y])
 
     def _get_obs(self) -> np.ndarray:
-        """
-        TODO(Person B): build the state vector — student model's
-        uncertainty across the remaining pool, labels_used / budget, class
-        balance among revealed labels so far.
-        """
-        probs = self.student_model.predict_proba(self._scaler.transform(self.pool_X))  # Get predicted probabilities for the pool
-        uncertainty = 1 - probs.max(axis=1).mean()  # Calculate uncertainty
-
-        labels_used_frac = self.oracle.num_revealed / self.budget  # Calculate fraction of labels used
-
-        all_revealed_y = np.concatenate([self.seed_y, self._revealed_y]) if self._revealed_y else self.seed_y  # Combine seed and revealed labels
-        class_balance = all_revealed_y.mean() # Calculate class balance
-
-        return np.array([uncertainty, labels_used_frac, class_balance], dtype=np.float32)  # Return the observation vector
+        probs = self.student_model.predict_proba(self._pool_X_scaled)
+        uncertainty = 1 - probs.max(axis=1).mean()
+        labels_used_frac = self.oracle.num_revealed / self.budget
+        class_balance = self._labels_so_far().mean()
+        return np.array([uncertainty, labels_used_frac, class_balance], dtype=np.float32)
 
     def _compute_reward(self, val_accuracy_before: float, val_accuracy_after: float) -> float:
         """reward_t = val_accuracy(model_t) - val_accuracy(model_{t-1}) — see project-context.md Section 8."""
