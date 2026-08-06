@@ -22,6 +22,8 @@ from typing import Optional
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
 
 from data.dataset import DatasetSplits
 from data.oracle import Oracle
@@ -42,6 +44,15 @@ class ActiveLearningEnv(gym.Env):
         self.test_X, self.test_y = splits.test_X, splits.test_y
         self._pool_y = splits.pool_y
 
+        # Fit once on the full feature pool (labels aren't involved, so this
+        # isn't leaking anything an active learning setup wouldn't already
+        # have — only pool_y is meant to stay hidden). Fitting this fresh on
+        # just the 20-sample seed set each episode was unstable: at least one
+        # of 30 features had near-zero variance in such a small sample,
+        # producing scaled values 15+ std devs out on the wider pool and
+        # overflowing the model's matmul.
+        self._scaler = StandardScaler().fit(np.concatenate([self.seed_X, self.pool_X]))
+
         self.budget = budget
         pool_capacity = len(self.pool_X)
 
@@ -49,7 +60,7 @@ class ActiveLearningEnv(gym.Env):
         # TODO(Person B): define the real observation space once _get_obs()'s
         # feature vector is decided (e.g. Box over [mean pool uncertainty,
         # labels_used / budget, class balance, ...]).
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-0.0, high=1.0, shape=(3,), dtype=np.float32)
 
         self.oracle: Optional[Oracle] = None
         self.student_model = None
@@ -61,7 +72,14 @@ class ActiveLearningEnv(gym.Env):
         observation via _get_obs().
         """
         super().reset(seed=seed)
-        raise NotImplementedError
+
+        self.oracle = Oracle(self._pool_y)
+        self._revealed_y = [] # Initialize a list to store revealed labels
+
+        self.student_model = LogisticRegression()  # Initialize the student model
+        self.student_model.fit(self._scaler.transform(self.seed_X), self.seed_y)  # Train the student model
+
+        return self._get_obs(), {}
 
     def step(self, action: int):
         """
@@ -88,7 +106,15 @@ class ActiveLearningEnv(gym.Env):
         uncertainty across the remaining pool, labels_used / budget, class
         balance among revealed labels so far.
         """
-        raise NotImplementedError
+        probs = self.student_model.predict_proba(self._scaler.transform(self.pool_X))  # Get predicted probabilities for the pool
+        uncertainty = 1 - probs.max(axis=1).mean()  # Calculate uncertainty
+
+        labels_used_frac = self.oracle.num_revealed / self.budget  # Calculate fraction of labels used
+
+        all_revealed_y = np.concatenate([self.seed_y, self._revealed_y]) if self._revealed_y else self.seed_y  # Combine seed and revealed labels
+        class_balance = all_revealed_y.mean() # Calculate class balance
+
+        return np.array([uncertainty, labels_used_frac, class_balance], dtype=np.float32)  # Return the observation vector
 
     def _compute_reward(self, val_accuracy_before: float, val_accuracy_after: float) -> float:
         """reward_t = val_accuracy(model_t) - val_accuracy(model_{t-1}) — see project-context.md Section 8."""
