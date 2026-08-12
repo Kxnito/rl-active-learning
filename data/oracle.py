@@ -10,11 +10,6 @@ import numpy as np
 
 class Oracle:
     def __init__(self, pool_y: np.ndarray):
-        """
-        TODO(Person A): store pool_y privately and set up whatever
-        bookkeeping reveal()/is_revealed() need (e.g. a revealed-mask or
-        a set of queried indices).
-        """
         self._pool_y = pool_y
         self._revealed_mask = np.zeros(len(pool_y), dtype=bool)
 
