@@ -25,13 +25,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--input-s3-uri",
         required=True,
-        help="S3 URI containing the training CSV file.",
+        help="S3 URI containing the prepared .npz dataset.",
     )
 
     parser.add_argument(
-        "--target-column",
-        default="target",
-        help="Name of the target column in the CSV.",
+        "--random-state",
+        type=int,
+        default=42,
+        help="Random seed used by the smoke-test classifier.",
     )
 
     parser.add_argument(
@@ -57,10 +58,12 @@ def main() -> None:
     args = parse_args()
     config = AWSConfig.from_environment()
 
-    boto_session = boto3.Session(region_name=config.region)
+    boto_session = boto3.Session(
+        region_name=config.region,
+    )
 
     sagemaker_session = sagemaker.Session(
-        boto_session=boto_session
+        boto_session=boto_session,
     )
 
     timestamp = time.strftime("%Y%m%d-%H%M%S")
@@ -71,7 +74,9 @@ def main() -> None:
         f"{config.project_prefix}/training-output"
     )
 
-    training_source_dir = Path(__file__).parent / "training"
+    training_source_dir = (
+        Path(__file__).parent / "training"
+    )
 
     if not training_source_dir.is_dir():
         raise FileNotFoundError(
@@ -79,11 +84,14 @@ def main() -> None:
             f"{training_source_dir}"
         )
 
-    training_script = training_source_dir / "train.py"
+    training_script = (
+        training_source_dir / "train.py"
+    )
 
     if not training_script.is_file():
         raise FileNotFoundError(
-            f"Training script not found: {training_script}"
+            f"Training script not found: "
+            f"{training_script}"
         )
 
     estimator = SKLearn(
@@ -97,11 +105,15 @@ def main() -> None:
         output_path=output_path,
         base_job_name="active-learning-smoke",
         sagemaker_session=sagemaker_session,
+
+        # New SageMaker accounts cannot use SageMaker Debugger.
+        # Explicitly disable Debugger and profiling.
+        debugger_hook_config=False,
+        disable_profiler=True,
+
         hyperparameters={
-            "target-column": args.target_column,
-            "random-state": 42,
-            "test-size": 0.2,
-        },
+            "random-state": args.random_state,
+            },
         metric_definitions=[
             {
                 "Name": "validation:accuracy",
@@ -115,7 +127,7 @@ def main() -> None:
 
     training_input = TrainingInput(
         s3_data=args.input_s3_uri,
-        content_type="text/csv",
+        content_type="application/octet-stream",
         input_mode="File",
     )
 
@@ -124,9 +136,12 @@ def main() -> None:
     print(f"Input: {args.input_s3_uri}")
     print(f"Output: {output_path}")
     print(f"Instance: {args.instance_type}")
+    print(f"Random state: {args.random_state}")
 
     estimator.fit(
-        inputs={"training": training_input},
+        inputs={
+            "training": training_input,
+        },
         job_name=job_name,
         wait=args.wait,
         logs=args.wait,
@@ -144,4 +159,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main() 
+    main()

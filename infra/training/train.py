@@ -8,10 +8,9 @@ import os
 from pathlib import Path
 
 import joblib
-import pandas as pd
+import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
-from sklearn.model_selection import train_test_split
 
 
 def parse_args() -> argparse.Namespace:
@@ -19,16 +18,6 @@ def parse_args() -> argparse.Namespace:
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument(
-        "--target-column",
-        type=str,
-        default="target",
-    )
-    parser.add_argument(
-        "--test-size",
-        type=float,
-        default=0.2,
-    )
     parser.add_argument(
         "--random-state",
         type=int,
@@ -38,21 +27,21 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def find_csv(input_directory: Path) -> Path:
-    """Find the first CSV file in the SageMaker input channel."""
+def find_npz(input_directory: Path) -> Path:
+    """Find the prepared dataset file in the SageMaker input channel."""
 
-    csv_files = sorted(input_directory.rglob("*.csv"))
+    npz_files = sorted(input_directory.rglob("*.npz"))
 
-    if not csv_files:
+    if not npz_files:
         raise FileNotFoundError(
-            f"No CSV file found under {input_directory}"
+            f"No .npz dataset found under {input_directory}"
         )
 
-    return csv_files[0]
+    return npz_files[0]
 
 
 def main() -> None:
-    """Train a simple classifier and save model artifacts and metrics."""
+    """Train a smoke-test classifier using Person A's dataset splits."""
 
     args = parse_args()
 
@@ -62,12 +51,14 @@ def main() -> None:
             "/opt/ml/input/data/training",
         )
     )
+
     model_directory = Path(
         os.environ.get(
             "SM_MODEL_DIR",
             "/opt/ml/model",
         )
     )
+
     output_directory = Path(
         os.environ.get(
             "SM_OUTPUT_DATA_DIR",
@@ -78,43 +69,49 @@ def main() -> None:
     model_directory.mkdir(parents=True, exist_ok=True)
     output_directory.mkdir(parents=True, exist_ok=True)
 
-    dataset_path = find_csv(training_directory)
+    dataset_path = find_npz(training_directory)
+
     print(f"Loading dataset from: {dataset_path}")
 
-    dataframe = pd.read_csv(dataset_path)
+    dataset = np.load(dataset_path)
 
-    if args.target_column not in dataframe.columns:
-        raise ValueError(
-            f"Target column '{args.target_column}' not found. "
-            f"Available columns: {list(dataframe.columns)}"
-        )
+    seed_x = dataset["seed_X"]
+    seed_y = dataset["seed_y"]
 
-    features = dataframe.drop(columns=[args.target_column])
-    target = dataframe[args.target_column]
+    pool_x = dataset["pool_X"]
+    pool_y = dataset["pool_y"]
 
-    train_x, test_x, train_y, test_y = train_test_split(
-        features,
-        target,
-        test_size=args.test_size,
-        random_state=args.random_state,
-        stratify=target,
-    )
+    val_x = dataset["val_X"]
+    val_y = dataset["val_y"]
+
+    test_x = dataset["test_X"]
+    test_y = dataset["test_y"]
+
+    print(f"Seed shape: {seed_x.shape}")
+    print(f"Pool shape: {pool_x.shape}")
+    print(f"Validation shape: {val_x.shape}")
+    print(f"Test shape: {test_x.shape}")
 
     model = LogisticRegression(
         max_iter=2000,
         random_state=args.random_state,
     )
-    model.fit(train_x, train_y)
 
-    predictions = model.predict(test_x)
-    accuracy = accuracy_score(test_y, predictions)
+    model.fit(seed_x, seed_y)
+
+    predictions = model.predict(val_x)
+    validation_accuracy = accuracy_score(
+        val_y,
+        predictions,
+    )
 
     metrics = {
         "algorithm": "logistic-regression-smoke-test",
-        "accuracy": float(accuracy),
-        "training_rows": int(len(train_x)),
+        "validation_accuracy": float(validation_accuracy),
+        "seed_rows": int(len(seed_x)),
+        "pool_rows": int(len(pool_x)),
+        "validation_rows": int(len(val_x)),
         "test_rows": int(len(test_x)),
-        "target_column": args.target_column,
         "random_state": args.random_state,
     }
 
@@ -123,10 +120,21 @@ def main() -> None:
 
     joblib.dump(model, model_path)
 
-    with metrics_path.open("w", encoding="utf-8") as file:
-        json.dump(metrics, file, indent=2)
+    with metrics_path.open(
+        "w",
+        encoding="utf-8",
+    ) as file:
+        json.dump(
+            metrics,
+            file,
+            indent=2,
+        )
 
-    print(f"validation_accuracy={accuracy:.6f}")
+    print(
+        f"validation_accuracy="
+        f"{validation_accuracy:.6f}"
+    )
+
     print(f"Saved model to: {model_path}")
     print(f"Saved metrics to: {metrics_path}")
     print(json.dumps(metrics))

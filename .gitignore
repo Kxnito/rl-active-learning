@@ -6,7 +6,12 @@ __pycache__/
 .Python
 build/
 dist/
+local-test/model/
+local-test/output/
+local-test/training/
 
+data/processed/
+s3-python-test.txt
 # --- Virtual environments ---
 venv/
 .venv/
