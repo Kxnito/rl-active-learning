@@ -35,4 +35,4 @@ class Oracle:
     def revealed_mask(self) -> np.ndarray:
         """Boolean array, True where that pool index has been revealed — a vectorized
         alternative to calling is_revealed() in a per-index loop, e.g. in action_masks()."""
-        return self._revealed.copy()
+        return self._revealed_mask.copy()
