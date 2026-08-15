@@ -1,11 +1,17 @@
 # --- Python ---
 __pycache__/
+*.pyc
 *.py[cod]
 *.egg-info/
 .Python
 build/
 dist/
+local-test/model/
+local-test/output/
+local-test/training/
 
+data/processed/
+s3-python-test.txt
 # --- Virtual environments ---
 venv/
 .venv/
@@ -33,6 +39,7 @@ data/*.parquet
 checkpoints/
 output/
 outputs/
+*.tar.gz
 model/
 models/
 
