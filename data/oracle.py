@@ -27,6 +27,14 @@ class Oracle:
             raise IndexError(f"Index {index} out of range")
         return self._revealed_mask[index]
 
+    def get_labels(self, indices) -> np.ndarray:
+        """Returns the true labels for a batch of indices — every index must
+        already be revealed (raises otherwise, same as reveal() on a repeat)."""
+        for index in indices:
+            if not self.is_revealed(index):
+                raise ValueError(f"Index {index} has not been revealed yet.")
+        return self._pool_y[indices]
+
     @property
     def num_revealed(self) -> int:
         return self._revealed_mask.sum()
