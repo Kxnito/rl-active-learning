@@ -81,7 +81,7 @@ class ActiveLearningEnv(gym.Env):
         self.student_model.fit(self._seed_X_scaled, self.seed_y)
         self._val_accuracy = self.student_model.score(self._val_X_scaled, self.val_y)
 
-        return self._get_obs(), {}
+        return self._get_obs(), {"val_accuracy": self._val_accuracy}
 
     def step(self, action: int):
         val_accuracy_before = self._val_accuracy
@@ -101,7 +101,7 @@ class ActiveLearningEnv(gym.Env):
 
         terminated = self.oracle.num_revealed >= self.budget
 
-        return self._get_obs(), reward, terminated, False, {}
+        return self._get_obs(), reward, terminated, False, {"val_accuracy": self._val_accuracy}
 
     def action_masks(self) -> np.ndarray:
         """Required by MaskablePPO. True = valid action (not yet revealed)."""

@@ -13,15 +13,28 @@ from data.dataset import DatasetSplits
 from data.oracle import Oracle
 import numpy as np
 from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
 from typing import List, Tuple
 
 
 class StudentModel:
-    def __init__(self, splits: DatasetSplits, revealed_seed_indices: List[int], revealed_pool_indices: List[int], oracle: Oracle):
+    def __init__(
+        self,
+        splits: DatasetSplits,
+        revealed_seed_indices: List[int],
+        revealed_pool_indices: List[int],
+        oracle: Oracle,
+        scaler: StandardScaler,
+    ):
         self.splits = splits
         self.oracle = oracle
         self.revealed_seed_indices = revealed_seed_indices
         self.revealed_pool_indices = revealed_pool_indices
+        # Fit once per run (by the caller, on seed_X+pool_X) and passed in
+        # here — not refit per step. Unscaled features previously caused
+        # LogisticRegression convergence warnings/instability, the same
+        # issue env/active_learning_env.py hit and fixed the same way.
+        self.scaler = scaler
         self.model = LogisticRegression(max_iter=1000)
 
     def train(self):
@@ -38,17 +51,17 @@ class StudentModel:
         if len(np.unique(y_train)) < 2:
             return
 
-        self.model.fit(X_train, y_train)
+        self.model.fit(self.scaler.transform(X_train), y_train)
 
     def predict_proba(self, pool_indices: List[int]) -> np.ndarray:
         X_pool = self.splits.pool_X[pool_indices]
-        return self.model.predict_proba(X_pool)
+        return self.model.predict_proba(self.scaler.transform(X_pool))
 
     def evaluate_val_accuracy(self) -> float:
         X_val = self.splits.val_X
         y_val = self.splits.val_y
         try:
-            y_pred = self.model.predict(X_val)
+            y_pred = self.model.predict(self.scaler.transform(X_val))
             return np.mean(y_pred == y_val)
         except Exception:
             return 0.0
@@ -57,6 +70,7 @@ def run_random_sampling(splits: DatasetSplits, oracle: Oracle, budget: int) -> L
     revealed_seed_indices = list(range(len(splits.seed_X)))
     revealed_pool_indices = []
     results = []
+    scaler = StandardScaler().fit(np.concatenate([splits.seed_X, splits.pool_X]))
 
     pool_indices = list(range(len(splits.pool_X)))
 
@@ -69,7 +83,7 @@ def run_random_sampling(splits: DatasetSplits, oracle: Oracle, budget: int) -> L
         oracle.reveal(chosen)
         revealed_pool_indices.append(chosen)
 
-        model = StudentModel(splits, revealed_seed_indices, revealed_pool_indices, oracle)
+        model = StudentModel(splits, revealed_seed_indices, revealed_pool_indices, oracle, scaler)
         model.train()
 
         acc = model.evaluate_val_accuracy()
@@ -81,11 +95,12 @@ def run_uncertainty_sampling(splits: DatasetSplits, oracle: Oracle, budget: int)
     revealed_seed_indices = list(range(len(splits.seed_X)))
     revealed_pool_indices = []
     results = []
+    scaler = StandardScaler().fit(np.concatenate([splits.seed_X, splits.pool_X]))
 
     pool_indices = list(range(len(splits.pool_X)))
 
     for _ in range(budget):
-        model = StudentModel(splits, revealed_seed_indices, revealed_pool_indices, oracle)
+        model = StudentModel(splits, revealed_seed_indices, revealed_pool_indices, oracle, scaler)
         model.train()
 
         unrevealed = [idx for idx in pool_indices if idx not in revealed_pool_indices]
