@@ -34,7 +34,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--test-size", type=int, default=100)
     parser.add_argument("--budget", type=int, default=50)
     parser.add_argument("--total-timesteps", type=int, default=10_000)
-    parser.add_argument("--output-dir", type=Path, default=Path("local-test/results"))
+    # Own subdirectory, not local-test/results/ directly — that dir also
+    # holds hand-crafted example fixtures (random-seed42.csv etc.) using
+    # the same run_id convention (method-seed). load_result_directory()
+    # globs recursively and concatenates everything it finds, so real
+    # sweep output landing next to those examples would silently merge
+    # with them under the same run_id and corrupt the aggregation.
+    parser.add_argument("--output-dir", type=Path, default=Path("local-test/results/experiments"))
 
     return parser.parse_args()
 
