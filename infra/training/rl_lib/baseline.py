@@ -1,0 +1,116 @@
+"""
+VENDORED from data/baseline.py — see dataset.py in this package for why.
+Keep this in sync with the real file; nothing here should diverge from it.
+"""
+
+from .dataset import DatasetSplits
+from .oracle import Oracle
+import numpy as np
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from typing import List, Tuple
+
+
+class StudentModel:
+    def __init__(
+        self,
+        splits: DatasetSplits,
+        revealed_seed_indices: List[int],
+        revealed_pool_indices: List[int],
+        oracle: Oracle,
+        scaler: StandardScaler,
+    ):
+        self.splits = splits
+        self.oracle = oracle
+        self.revealed_seed_indices = revealed_seed_indices
+        self.revealed_pool_indices = revealed_pool_indices
+        self.scaler = scaler
+        self.model = LogisticRegression(max_iter=1000)
+
+    def train(self):
+        X_seed = self.splits.seed_X[self.revealed_seed_indices]
+        y_seed = self.splits.seed_y[self.revealed_seed_indices]
+
+        X_pool = self.splits.pool_X[self.revealed_pool_indices]
+        y_pool = self.oracle.get_labels(self.revealed_pool_indices)
+
+        X_train = np.vstack([X_seed, X_pool])
+        y_train = np.concatenate([y_seed, y_pool])
+
+        if len(np.unique(y_train)) < 2:
+            return
+
+        self.model.fit(self.scaler.transform(X_train), y_train)
+
+    def predict_proba(self, pool_indices: List[int]) -> np.ndarray:
+        X_pool = self.splits.pool_X[pool_indices]
+        return self.model.predict_proba(self.scaler.transform(X_pool))
+
+    def evaluate_val_accuracy(self) -> float:
+        X_val = self.splits.val_X
+        y_val = self.splits.val_y
+        try:
+            y_pred = self.model.predict(self.scaler.transform(X_val))
+            return np.mean(y_pred == y_val)
+        except Exception:
+            return 0.0
+
+def run_random_sampling(splits: DatasetSplits, oracle: Oracle, budget: int) -> List[Tuple[int, float]]:
+    revealed_seed_indices = list(range(len(splits.seed_X)))
+    revealed_pool_indices = []
+    results = []
+    scaler = StandardScaler().fit(np.concatenate([splits.seed_X, splits.pool_X]))
+
+    pool_indices = list(range(len(splits.pool_X)))
+
+    for _ in range(budget):
+        unrevealed = [idx for idx in pool_indices if idx not in revealed_pool_indices]
+        if not unrevealed:
+            break
+
+        chosen = np.random.choice(unrevealed)
+        oracle.reveal(chosen)
+        revealed_pool_indices.append(chosen)
+
+        model = StudentModel(splits, revealed_seed_indices, revealed_pool_indices, oracle, scaler)
+        model.train()
+
+        acc = model.evaluate_val_accuracy()
+        results.append((len(revealed_seed_indices) + len(revealed_pool_indices), acc))
+
+    return results
+
+def run_uncertainty_sampling(splits: DatasetSplits, oracle: Oracle, budget: int) -> List[Tuple[int, float]]:
+    revealed_seed_indices = list(range(len(splits.seed_X)))
+    revealed_pool_indices = []
+    results = []
+    scaler = StandardScaler().fit(np.concatenate([splits.seed_X, splits.pool_X]))
+
+    pool_indices = list(range(len(splits.pool_X)))
+
+    for _ in range(budget):
+        model = StudentModel(splits, revealed_seed_indices, revealed_pool_indices, oracle, scaler)
+        model.train()
+
+        unrevealed = [idx for idx in pool_indices if idx not in revealed_pool_indices]
+        if not unrevealed:
+            break
+
+        probs = model.predict_proba(unrevealed)
+
+        margins = []
+        for p in probs:
+            sorted_p = sorted(p, reverse=True)
+            margin = sorted_p[0] - sorted_p[1]
+            margins.append(margin)
+
+        min_margin_idx = np.argmin(margins)
+        chosen = unrevealed[min_margin_idx]
+
+        oracle.reveal(chosen)
+        revealed_pool_indices.append(chosen)
+
+        acc = model.evaluate_val_accuracy()
+        results.append((len(revealed_seed_indices) + len(revealed_pool_indices), acc))
+
+    return results

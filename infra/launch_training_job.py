@@ -32,7 +32,29 @@ def parse_args() -> argparse.Namespace:
         "--random-state",
         type=int,
         default=42,
-        help="Random seed used by the smoke-test classifier.",
+        help="Random seed for training stochasticity (random sampling's "
+        "choices, MaskablePPO). Does not reseed the data split itself — "
+        "that's fixed at upload time in the .npz file.",
+    )
+
+    parser.add_argument(
+        "--budget",
+        type=int,
+        default=50,
+        help="Labeling budget per method (project-context.md Section 8).",
+    )
+
+    parser.add_argument(
+        "--total-timesteps",
+        type=int,
+        default=10_000,
+        help="MaskablePPO training timesteps.",
+    )
+
+    parser.add_argument(
+        "--dataset-name",
+        default="breast_cancer",
+        help="Dataset label recorded in the result CSV's dataset column.",
     )
 
     parser.add_argument(
@@ -67,7 +89,7 @@ def main() -> None:
     )
 
     timestamp = time.strftime("%Y%m%d-%H%M%S")
-    job_name = f"active-learning-smoke-{timestamp}"
+    job_name = f"active-learning-experiment-{timestamp}"
 
     output_path = (
         f"s3://{config.bucket}/"
@@ -103,7 +125,7 @@ def main() -> None:
         framework_version="1.4-2",
         py_version="py3",
         output_path=output_path,
-        base_job_name="active-learning-smoke",
+        base_job_name="active-learning-experiment",
         sagemaker_session=sagemaker_session,
 
         # New SageMaker accounts cannot use SageMaker Debugger.
@@ -113,15 +135,21 @@ def main() -> None:
 
         hyperparameters={
             "random-state": args.random_state,
+            "budget": args.budget,
+            "total-timesteps": args.total_timesteps,
+            "dataset-name": args.dataset_name,
             },
         metric_definitions=[
-            {
-                "Name": "validation:accuracy",
-                "Regex": (
-                    r"validation_accuracy=([0-9.]+)"
-                ),
-            }
+            {"Name": "random:val_accuracy", "Regex": r"random_final_val_accuracy=([0-9.]+)"},
+            {"Name": "uncertainty:val_accuracy", "Regex": r"uncertainty_final_val_accuracy=([0-9.]+)"},
+            {"Name": "rl:val_accuracy", "Regex": r"rl_final_val_accuracy=([0-9.]+)"},
+            {"Name": "rl:test_accuracy", "Regex": r"rl_final_test_accuracy=([0-9.]+)"},
         ],
+        # RL training (MaskablePPO) plus installing torch/sb3-contrib in
+        # the container takes noticeably longer than the old smoke test's
+        # single LogisticRegression fit — still comfortably under an hour
+        # locally (budget=50/timesteps=10_000 ran in well under a minute
+        # once dependencies were installed), but leaving headroom.
         max_run=3600,
     )
 
